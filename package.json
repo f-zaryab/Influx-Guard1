@@ -1,0 +1,59 @@
+{
+  "name": "influxguard",
+  "version": "0.1.0",
+  "description": "A lightweight rate limiter for Express and NestJS",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "prepublishOnly": "npm run typecheck && npm run test:run && npm run build"
+  },
+  "keywords": [
+    "rate-limiter",
+    "rate-limit",
+    "express",
+    "nestjs",
+    "nodejs",
+    "middleware"
+  ],
+  "author": "zaryab",
+  "license": "MIT",
+  "peerDependencies": {
+    "express": ">=5",
+    "@nestjs/common": ">=11",
+    "@nestjs/core": ">=11"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^12.0.1",
+    "@nestjs/core": "^12.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.5.0",
+    "@types/supertest": "^7.2.1",
+    "express": "^5.2.1",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "supertest": "^7.2.2",
+    "tsdown": "^0.23.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.0"
+  }
+}
