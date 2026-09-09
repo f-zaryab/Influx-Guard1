@@ -6,11 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: [
-    "express",
-    "@nestjs/common",
-    "@nestjs/core",
-    "reflect-metadata",
-    "rxjs",
-  ],
+  external: ["express", "@nestjs/common", "@nestjs/core", "reflect-metadata", "rxjs"],
 });

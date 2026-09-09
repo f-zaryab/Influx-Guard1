@@ -1,5 +1,5 @@
-import { RateLimitResult } from "../cores/types";
-import { Store } from "./store";
+import type { RateLimitResult } from "../cores/types";
+import type { Store } from "./store";
 
 type MemoryEntry = {
   count: number;
