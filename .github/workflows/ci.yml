@@ -1,0 +1,37 @@
+# /.github/workflows/ci.yaml
+# # GitHub Actions workflow to run linting, type checks, tests, and build on pushes and pull requests.
+name: CI
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  ci:
+    name: Lint, Typecheck, Test and Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Biome checks
+        run: npm run check
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm run test:run
+
+      - name: Build project
+        run: npm run build
