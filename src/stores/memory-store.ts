@@ -1,4 +1,4 @@
-import type { RateLimitResult } from "../cores/types";
+import type { RateLimitResult } from "../core/types";
 import type { Store } from "./store";
 
 type MemoryEntry = {

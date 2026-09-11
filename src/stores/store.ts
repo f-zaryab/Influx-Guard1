@@ -1,4 +1,4 @@
-import type { RateLimitResult } from "../cores/types";
+import type { RateLimitResult } from "../core/types";
 
 export interface Store {
   increment(key: string, windowMs: number): Promise<RateLimitResult>;
