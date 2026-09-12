@@ -1,39 +1,42 @@
 # InfluxGuard
 
-A lightweight and extensible rate limiter for Node.js applications, with first-class support for **Express** and **NestJS**.
+A lightweight and extensible rate limiter for Node.js applications with first-class support for **Express** and **NestJS**.
 
-InfluxGuard helps protect your APIs from excessive requests by limiting how many requests a client can make within a configured time window.
+InfluxGuard helps protect APIs from excessive requests by limiting how many requests a client can make within a configured time window.
 
 ## Features
 
-- Lightweight and simple API
+- Lightweight API
 - TypeScript support
 - Express middleware integration
 - NestJS guard integration
 - Configurable request limits
 - Configurable time windows
-- Framework-independent rate limiting core
+- Custom request key generators
+- Custom rate-limit error messages
+- Framework-independent rate-limiting core
 - In-memory storage
-- Rate limit response headers
-- HTTP `429 Too Many Requests` responses when limits are exceeded
+- Rate-limit response headers
+- `Retry-After` header for blocked requests
+- HTTP `429 Too Many Requests` responses
 
 ---
 
 ## Installation
 
-Install InfluxGuard using npm:
+Using npm:
 
 ```bash
 npm install influxguard
 ```
 
-Or with pnpm:
+Using pnpm:
 
 ```bash
 pnpm add influxguard
 ```
 
-Or Yarn:
+Using Yarn:
 
 ```bash
 yarn add influxguard
@@ -43,24 +46,28 @@ yarn add influxguard
 
 # Express
 
-InfluxGuard can be used as standard Express middleware.
+InfluxGuard exposes the `expressRateLimiter()` middleware for Express applications.
+
+```ts
+import { expressRateLimiter } from "influxguard";
+```
 
 ## Basic usage
 
 ```ts
 import express from "express";
-import { InfluxGuardMiddleware } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 
 const app = express();
 
 app.use(
-  InfluxGuardMiddleware.create({
+  expressRateLimiter({
     limit: 100,
     windowMs: 60_000,
   }),
 );
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.json({
     message: "Hello from Express",
   });
@@ -71,89 +78,141 @@ app.listen(3000, () => {
 });
 ```
 
-This configuration allows each client to make:
+This configuration allows a client to make:
 
 ```text
 100 requests every 60 seconds
 ```
 
-Once the client exceeds the configured limit, InfluxGuard rejects further requests until the current rate-limit window resets.
+After the limit is exceeded, further requests are rejected with HTTP status `429` until the current rate-limit window expires.
 
 ---
 
-## Protect only specific routes
+## Protect a group of routes
 
-You do not have to apply InfluxGuard globally.
+Express allows middleware to be mounted on a particular path.
 
-You can protect individual routes:
+For example, to protect everything under `/api`:
 
 ```ts
 import express from "express";
-import { InfluxGuardMiddleware } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 
 const app = express();
 
-const limiter = InfluxGuardMiddleware.create({
+app.use(
+  "/api",
+  expressRateLimiter({
+    limit: 5,
+    windowMs: 60_000,
+  }),
+);
+
+app.get("/api", (_req, res) => {
+  res.json({
+    message: "Hello from Express",
+  });
+});
+
+app.get("/public", (_req, res) => {
+  res.json({
+    message: "This route is not rate limited",
+  });
+});
+
+app.listen(3000, () => {
+  console.log("Server running on http://localhost:3000");
+});
+```
+
+In this example:
+
+```text
+/api     → rate limited
+/public  → not rate limited
+```
+
+---
+
+## Protect a single route
+
+The limiter can also be passed directly to an Express route.
+
+```ts
+import express from "express";
+import { expressRateLimiter } from "influxguard";
+
+const app = express();
+
+const loginLimiter = expressRateLimiter({
   limit: 5,
   windowMs: 60_000,
 });
 
-app.get("/public", (req, res) => {
+app.post("/login", loginLimiter, (_req, res) => {
   res.json({
-    message: "Public endpoint",
+    message: "Login request accepted",
   });
 });
 
-app.get("/protected", limiter, (req, res) => {
+app.get("/health", (_req, res) => {
   res.json({
-    message: "Rate limited endpoint",
+    status: "ok",
   });
 });
 
 app.listen(3000);
 ```
 
-In this example:
-
-```text
-/public       → not rate limited
-/protected    → limited to 5 requests per minute
-```
+This is useful when only particular endpoints require protection.
 
 ---
 
 ## Different limits for different routes
 
-You can create multiple rate limiters:
+You can create multiple rate limiters with different configurations.
 
 ```ts
 import express from "express";
-import { InfluxGuardMiddleware } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 
 const app = express();
 
-const apiLimiter = InfluxGuardMiddleware.create({
+const apiLimiter = expressRateLimiter({
   limit: 100,
   windowMs: 60_000,
 });
 
-const loginLimiter = InfluxGuardMiddleware.create({
+const loginLimiter = expressRateLimiter({
   limit: 5,
   windowMs: 60_000,
 });
 
 app.use("/api", apiLimiter);
 
-app.post("/login", loginLimiter, (req, res) => {
+app.post("/login", loginLimiter, (_req, res) => {
   res.json({
     message: "Login request accepted",
+  });
+});
+
+app.get("/api/users", (_req, res) => {
+  res.json({
+    users: [],
   });
 });
 
 app.listen(3000);
 ```
 
-This can be useful for applying stricter limits to sensitive endpoints such as:
+For example:
+
+```text
+/api/*   → 100 requests per minute
+/login   → 5 requests per minute
+```
+
+Stricter limits are often useful for endpoints such as:
 
 - login
 - registration
@@ -163,33 +222,175 @@ This can be useful for applying stricter limits to sensitive endpoints such as:
 
 ---
 
-# NestJS
+# Express custom key generator
 
-InfluxGuard can also be used as a NestJS guard.
+By default, a rate limiter needs a key to identify which client owns a particular rate-limit bucket.
 
-## Basic usage
+InfluxGuard supports a custom `keyGenerator` when you want to determine that key yourself.
 
-Import the guard:
+For example, you can rate limit clients using an API key:
 
 ```ts
-import { InfluxGuardGuard } from "influxguard";
+import express from "express";
+import { expressRateLimiter } from "influxguard";
+
+const app = express();
+
+app.use(
+  expressRateLimiter({
+    limit: 10,
+    windowMs: 60_000,
+
+    keyGenerator: (req) => req.headers["x-api-key"]?.toString() ?? "anonymous",
+  }),
+);
+
+app.get("/", (_req, res) => {
+  res.json({
+    message: "Hello",
+  });
+});
+
+app.listen(3000);
+```
+
+Requests with different keys receive independent rate-limit buckets.
+
+For example:
+
+```text
+x-api-key: user-a
+```
+
+and:
+
+```text
+x-api-key: user-b
+```
+
+are tracked independently.
+
+If the limit is `1`:
+
+```text
+user-a → request 1 → allowed
+user-a → request 2 → blocked
+
+user-b → request 1 → allowed
+```
+
+A custom key generator can also be useful for rate limiting by:
+
+- authenticated user ID
+- API key
+- tenant ID
+- customer ID
+- session ID
+- another application-specific identifier
+
+---
+
+# Express response headers
+
+InfluxGuard adds rate-limit information to the response headers.
+
+For example:
+
+```http
+RateLimit-Limit: 5
+RateLimit-Remaining: 4
+RateLimit-Reset: ...
+```
+
+### `RateLimit-Limit`
+
+The maximum number of requests allowed during the current window.
+
+### `RateLimit-Remaining`
+
+The number of requests remaining in the current window.
+
+For a limit of `2`:
+
+```text
+Request 1 → RateLimit-Remaining: 1
+Request 2 → RateLimit-Remaining: 0
+```
+
+### `RateLimit-Reset`
+
+Indicates when the current rate-limit window resets.
+
+---
+
+## Blocked Express requests
+
+When the configured limit is exceeded, InfluxGuard returns:
+
+```http
+HTTP/1.1 429 Too Many Requests
+```
+
+with a response similar to:
+
+```json
+{
+  "message": "Too many requests"
+}
+```
+
+The response also includes:
+
+```http
+RateLimit-Limit: 5
+RateLimit-Remaining: 0
+Retry-After: ...
+```
+
+The `Retry-After` header tells the client approximately how long it should wait before trying again.
+
+---
+
+# NestJS
+
+InfluxGuard exposes `createNestRateLimiterGuard()` for NestJS applications.
+
+```ts
+import { createNestRateLimiterGuard } from "influxguard";
+```
+
+The function creates a NestJS guard class configured with your rate-limit settings.
+
+---
+
+## Basic NestJS usage
+
+Create a guard:
+
+```ts
+import { createNestRateLimiterGuard } from "influxguard";
+
+const RateLimitGuard = createNestRateLimiterGuard({
+  limit: 100,
+  windowMs: 60_000,
+});
 ```
 
 Then apply it using NestJS's `@UseGuards()` decorator.
 
 ```ts
 import { Controller, Get, UseGuards } from "@nestjs/common";
-import { InfluxGuardGuard } from "influxguard";
+import { createNestRateLimiterGuard } from "influxguard";
+
+const RateLimitGuard = createNestRateLimiterGuard({
+  limit: 100,
+  windowMs: 60_000,
+});
 
 @Controller("users")
 export class UsersController {
   @Get()
-  @UseGuards(
-    InfluxGuardGuard.create({
-      limit: 100,
-      windowMs: 60_000,
-    }),
-  )
+  @UseGuards(RateLimitGuard)
   findAll() {
     return {
       message: "Users endpoint",
@@ -201,28 +402,28 @@ export class UsersController {
 The endpoint now allows:
 
 ```text
-100 requests every 60 seconds per client
+100 requests every 60 seconds
 ```
 
-Requests exceeding the configured limit receive a `429 Too Many Requests` response.
+Further requests during the same window receive HTTP `429`.
 
 ---
 
-## Protect an entire NestJS controller
+# Protect an entire NestJS controller
 
-You can apply the guard at controller level:
+The guard can be applied at controller level.
 
 ```ts
 import { Controller, Get, Post, UseGuards } from "@nestjs/common";
-import { InfluxGuardGuard } from "influxguard";
+import { createNestRateLimiterGuard } from "influxguard";
+
+const ProductsRateLimitGuard = createNestRateLimiterGuard({
+  limit: 100,
+  windowMs: 60_000,
+});
 
 @Controller("products")
-@UseGuards(
-  InfluxGuardGuard.create({
-    limit: 100,
-    windowMs: 60_000,
-  }),
-)
+@UseGuards(ProductsRateLimitGuard)
 export class ProductsController {
   @Get()
   findAll() {
@@ -240,41 +441,41 @@ export class ProductsController {
 }
 ```
 
-All routes inside the controller will use the same rate limit.
+All endpoints inside the controller are now protected by the same limiter.
 
 ---
 
-## Route-specific NestJS limits
+# Route-specific NestJS limits
 
-Different endpoints can use different limits.
+Different guards can be created for different endpoints.
 
 ```ts
-import { Body, Controller, Post, UseGuards } from "@nestjs/common";
-import { InfluxGuardGuard } from "influxguard";
+import { Controller, Post, UseGuards } from "@nestjs/common";
+import { createNestRateLimiterGuard } from "influxguard";
+
+const LoginRateLimitGuard = createNestRateLimiterGuard({
+  limit: 5,
+  windowMs: 60_000,
+});
+
+const RegistrationRateLimitGuard = createNestRateLimiterGuard({
+  limit: 3,
+  windowMs: 60_000,
+});
 
 @Controller("auth")
 export class AuthController {
   @Post("login")
-  @UseGuards(
-    InfluxGuardGuard.create({
-      limit: 5,
-      windowMs: 60_000,
-    }),
-  )
-  login(@Body() body: unknown) {
+  @UseGuards(LoginRateLimitGuard)
+  login() {
     return {
       message: "Login request accepted",
     };
   }
 
   @Post("register")
-  @UseGuards(
-    InfluxGuardGuard.create({
-      limit: 3,
-      windowMs: 60_000,
-    }),
-  )
-  register(@Body() body: unknown) {
+  @UseGuards(RegistrationRateLimitGuard)
+  register() {
     return {
       message: "Registration request accepted",
     };
@@ -282,42 +483,157 @@ export class AuthController {
 }
 ```
 
-For example:
+The resulting limits are:
 
 ```text
 POST /auth/login
-5 requests / minute
+5 requests per minute
 
 POST /auth/register
-3 requests / minute
+3 requests per minute
+```
+
+---
+
+# NestJS custom key generator
+
+NestJS guards also support custom request keys.
+
+For example:
+
+```ts
+import { Controller, Get, UseGuards } from "@nestjs/common";
+import { createNestRateLimiterGuard } from "influxguard";
+
+const ApiKeyRateLimitGuard = createNestRateLimiterGuard({
+  limit: 10,
+  windowMs: 60_000,
+
+  keyGenerator: (request) => request.headers["x-api-key"] as string,
+});
+
+@Controller("api")
+@UseGuards(ApiKeyRateLimitGuard)
+export class ApiController {
+  @Get()
+  index() {
+    return {
+      message: "Hello",
+    };
+  }
+}
+```
+
+Different API keys are tracked independently.
+
+For example:
+
+```text
+user-a → own rate-limit bucket
+user-b → separate rate-limit bucket
+```
+
+---
+
+# Custom error messages
+
+NestJS rate limiters support a custom message for blocked requests.
+
+```ts
+import { createNestRateLimiterGuard } from "influxguard";
+
+const RateLimitGuard = createNestRateLimiterGuard({
+  limit: 5,
+  windowMs: 60_000,
+  message: "Slow down",
+});
+```
+
+When the limit is exceeded, the response will contain:
+
+```json
+{
+  "message": "Slow down"
+}
+```
+
+instead of the default:
+
+```json
+{
+  "message": "Too many requests"
+}
+```
+
+---
+
+# NestJS response headers
+
+NestJS responses include the same rate-limit information.
+
+For example:
+
+```http
+RateLimit-Limit: 2
+RateLimit-Remaining: 1
+RateLimit-Reset: ...
+```
+
+After another successful request:
+
+```http
+RateLimit-Limit: 2
+RateLimit-Remaining: 0
+RateLimit-Reset: ...
+```
+
+When another request exceeds the limit:
+
+```http
+HTTP/1.1 429 Too Many Requests
+
+RateLimit-Limit: 2
+RateLimit-Remaining: 0
+Retry-After: ...
 ```
 
 ---
 
 # Configuration
 
-InfluxGuard accepts configuration through `InfluxGuardOptions`.
+Both Express and NestJS integrations share the same core rate-limiting concepts.
 
-```ts
-import type { InfluxGuardOptions } from "influxguard";
-```
-
-Example:
-
-```ts
-const options: InfluxGuardOptions = {
-  limit: 100,
-  windowMs: 60_000,
-};
-```
-
-## `limit`
-
-Maximum number of requests allowed within the configured window.
+A basic configuration looks like:
 
 ```ts
 {
-  limit: 100;
+  limit: 100,
+  windowMs: 60_000,
+}
+```
+
+Additional supported options include:
+
+```ts
+{
+  limit: 100,
+  windowMs: 60_000,
+  keyGenerator: (request) => "...",
+  message: "Too many requests",
+}
+```
+
+Support for individual options may depend on the framework adapter.
+
+---
+
+## `limit`
+
+Maximum number of requests allowed during one rate-limit window.
+
+```ts
+{
+  limit: 100,
 }
 ```
 
@@ -327,31 +643,31 @@ For example:
 limit: 100
 ```
 
-means that a client can make up to 100 requests during the current window.
+means that a client can make up to 100 requests during the active window.
+
+The next request is blocked.
 
 ---
 
 ## `windowMs`
 
-Duration of the rate-limit window in milliseconds.
-
-For example:
+Length of the rate-limit window in milliseconds.
 
 ```ts
 {
-  windowMs: 60_000;
+  windowMs: 60_000,
 }
 ```
 
 represents:
 
 ```text
-60,000 ms
+60,000 milliseconds
 = 60 seconds
 = 1 minute
 ```
 
-Some common values:
+Common values:
 
 | Duration   |       Value |
 | ---------- | ----------: |
@@ -364,42 +680,53 @@ Some common values:
 
 ---
 
-# Example configuration
+## `keyGenerator`
 
-Allow 60 requests every minute:
+Controls how requests are grouped into rate-limit buckets.
 
-```ts
-{
-  limit: 60,
-  windowMs: 60_000,
-}
-```
-
-Allow 1,000 requests every hour:
+Express example:
 
 ```ts
-{
-  limit: 1_000,
-  windowMs: 3_600_000,
-}
+keyGenerator: (req) => req.headers["x-api-key"]?.toString() ?? "anonymous";
 ```
 
-Apply a strict login limit:
+NestJS example:
+
+```ts
+keyGenerator: (request) => request.headers["x-api-key"] as string;
+```
+
+This lets applications rate limit using identifiers other than the default client identity.
+
+---
+
+## `message`
+
+Customizes the error message returned when a request is blocked.
+
+Example:
 
 ```ts
 {
   limit: 5,
   windowMs: 60_000,
+  message: "Slow down",
+}
+```
+
+Blocked requests return:
+
+```json
+{
+  "message": "Slow down"
 }
 ```
 
 ---
 
-# Rate Limit Behavior
+# Rate-limit behavior
 
-InfluxGuard tracks the number of requests made by a client during a configured time window.
-
-For example:
+Consider:
 
 ```ts
 {
@@ -408,85 +735,227 @@ For example:
 }
 ```
 
-A client's requests behave approximately like this:
+The request sequence behaves like:
 
 ```text
 Request 1 → allowed
 Request 2 → allowed
 Request 3 → allowed
-Request 4 → rejected
-Request 5 → rejected
+
+Request 4 → 429 Too Many Requests
+Request 5 → 429 Too Many Requests
 
             ↓
 
-       window expires
+      window expires
 
             ↓
 
 Request 1 → allowed again
 ```
 
-When the window expires, the request counter resets.
+The request counter resets when the current window expires.
 
 ---
 
-# HTTP Response
+# Rate-limit headers
 
-When a client exceeds the configured request limit, InfluxGuard returns:
+InfluxGuard exposes information about the active rate limit using response headers.
+
+```text
+RateLimit-Limit
+RateLimit-Remaining
+RateLimit-Reset
+```
+
+Blocked requests additionally receive:
+
+```text
+Retry-After
+```
+
+For a limiter configured as:
+
+```ts
+{
+  limit: 2,
+  windowMs: 60_000,
+}
+```
+
+the requests would approximately look like:
+
+```text
+Request 1
+Status: 200
+RateLimit-Limit: 2
+RateLimit-Remaining: 1
+
+Request 2
+Status: 200
+RateLimit-Limit: 2
+RateLimit-Remaining: 0
+
+Request 3
+Status: 429
+RateLimit-Limit: 2
+RateLimit-Remaining: 0
+Retry-After: ...
+```
+
+---
+
+# HTTP 429 response
+
+When the limit is exceeded, InfluxGuard responds with:
 
 ```http
 HTTP/1.1 429 Too Many Requests
 ```
 
-This indicates that the client must wait until the current rate-limit window resets before making additional requests.
+By default, the response body contains:
+
+```json
+{
+  "message": "Too many requests"
+}
+```
+
+The client should respect the `Retry-After` header before retrying the request.
 
 ---
 
 # Express vs NestJS
 
-InfluxGuard exposes framework-specific integrations over the same rate-limiting behavior.
+InfluxGuard provides framework-specific adapters built on the same rate-limiting core.
 
-For Express:
+### Express
 
 ```ts
-import { InfluxGuardMiddleware } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 ```
 
-Use:
+Usage:
 
 ```ts
-InfluxGuardMiddleware.create({
+app.use(
+  expressRateLimiter({
+    limit: 100,
+    windowMs: 60_000,
+  }),
+);
+```
+
+### NestJS
+
+```ts
+import { createNestRateLimiterGuard } from "influxguard";
+```
+
+Usage:
+
+```ts
+const RateLimitGuard = createNestRateLimiterGuard({
   limit: 100,
   windowMs: 60_000,
 });
 ```
 
-For NestJS:
+Then:
 
 ```ts
-import { InfluxGuardGuard } from "influxguard";
-```
-
-Use:
-
-```ts
-InfluxGuardGuard.create({
-  limit: 100,
-  windowMs: 60_000,
-});
+@UseGuards(RateLimitGuard)
 ```
 
 Conceptually:
 
 ```text
-                    InfluxGuard
-                        │
-                Rate Limiting Core
-                   /          \
-                  /            \
-                 ▼              ▼
-          Express Adapter   NestJS Adapter
-           Middleware          Guard
+                     InfluxGuard
+                         │
+                  Rate Limiting Core
+                    /           \
+                   /             \
+                  ▼               ▼
+          Express Adapter    NestJS Adapter
+             Middleware          Guard
+```
+
+---
+
+# Complete Express example
+
+```ts
+import express from "express";
+import { expressRateLimiter } from "influxguard";
+
+const app = express();
+
+app.use(express.json());
+
+app.use(
+  "/api",
+  expressRateLimiter({
+    limit: 5,
+    windowMs: 60_000,
+  }),
+);
+
+app.get("/api", (_req, res) => {
+  res.json({
+    message: "InfluxGuard is protecting this API",
+  });
+});
+
+app.listen(3000, () => {
+  console.log("Server running on http://localhost:3000");
+});
+```
+
+Run the server and repeatedly call:
+
+```bash
+curl http://localhost:3000/api
+```
+
+The first five requests are allowed.
+
+Further requests during the same window receive:
+
+```http
+429 Too Many Requests
+```
+
+---
+
+# Complete NestJS example
+
+```ts
+import { Controller, Get, UseGuards } from "@nestjs/common";
+import { createNestRateLimiterGuard } from "influxguard";
+
+const AppRateLimitGuard = createNestRateLimiterGuard({
+  limit: 10,
+  windowMs: 60_000,
+});
+
+@Controller()
+@UseGuards(AppRateLimitGuard)
+export class AppController {
+  @Get()
+  getHello() {
+    return {
+      message: "InfluxGuard is protecting this endpoint",
+    };
+  }
+}
+```
+
+The endpoint allows 10 requests during each 60-second window.
+
+Requests after the limit receive:
+
+```http
+429 Too Many Requests
 ```
 
 ---
@@ -495,17 +964,30 @@ Conceptually:
 
 InfluxGuard is written in TypeScript and ships with type declarations.
 
-No additional `@types` package is required.
+No separate `@types/influxguard` package is required.
+
+Type inference works directly with the package API:
 
 ```ts
-import { InfluxGuardMiddleware, type InfluxGuardOptions } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 
-const options: InfluxGuardOptions = {
+const limiter = expressRateLimiter({
   limit: 100,
   windowMs: 60_000,
-};
 
-const limiter = InfluxGuardMiddleware.create(options);
+  keyGenerator: (req) => req.headers["x-api-key"]?.toString() ?? "anonymous",
+});
+```
+
+NestJS usage is also fully typed:
+
+```ts
+import { createNestRateLimiterGuard } from "influxguard";
+
+const RateLimitGuard = createNestRateLimiterGuard({
+  limit: 100,
+  windowMs: 60_000,
+});
 ```
 
 ---
@@ -517,103 +999,18 @@ InfluxGuard is distributed as an ES module.
 Use standard ES module imports:
 
 ```ts
-import { InfluxGuardMiddleware } from "influxguard";
+import { expressRateLimiter } from "influxguard";
 ```
 
-Rather than:
-
-```js
-const influxGuard = require("influxguard");
-```
-
----
-
-# Express Example
-
-Complete example:
+or:
 
 ```ts
-import express from "express";
-import { InfluxGuardMiddleware } from "influxguard";
-
-const app = express();
-
-app.use(express.json());
-
-app.use(
-  InfluxGuardMiddleware.create({
-    limit: 100,
-    windowMs: 60_000,
-  }),
-);
-
-app.get("/", (req, res) => {
-  res.json({
-    message: "InfluxGuard is protecting this API",
-  });
-});
-
-app.listen(3000, () => {
-  console.log("Server running on http://localhost:3000");
-});
-```
-
-Install the dependencies:
-
-```bash
-npm install express influxguard
-```
-
-Run the server and repeatedly call:
-
-```bash
-curl http://localhost:3000
-```
-
-Once the configured request limit is exceeded, the server will respond with HTTP status `429`.
-
----
-
-# NestJS Example
-
-Install InfluxGuard in an existing NestJS application:
-
-```bash
-npm install influxguard
-```
-
-Then protect an endpoint:
-
-```ts
-import { Controller, Get, UseGuards } from "@nestjs/common";
-import { InfluxGuardGuard } from "influxguard";
-
-@Controller()
-export class AppController {
-  @Get()
-  @UseGuards(
-    InfluxGuardGuard.create({
-      limit: 10,
-      windowMs: 60_000,
-    }),
-  )
-  getHello() {
-    return {
-      message: "InfluxGuard is protecting this endpoint",
-    };
-  }
-}
-```
-
-Repeated requests exceeding the configured limit will receive:
-
-```http
-429 Too Many Requests
+import { createNestRateLimiterGuard } from "influxguard";
 ```
 
 ---
 
-# Recommended Usage
+# Recommended usage
 
 General API endpoints:
 
@@ -642,13 +1039,46 @@ Expensive operations:
 }
 ```
 
-Choose values appropriate for your application's expected traffic and security requirements.
+These are only examples.
+
+Choose limits appropriate for your application's expected traffic, infrastructure, and security requirements.
+
+---
+
+# Storage
+
+InfluxGuard currently uses an **in-memory store**.
+
+This means rate-limit state is stored inside the Node.js process running your application.
+
+This works well for:
+
+- development
+- testing
+- single-process applications
+- simple deployments
+
+For applications running multiple Node.js instances, containers, workers, or servers, each process currently maintains its own independent rate-limit state.
+
+For example:
+
+```text
+Node Instance A
+MemoryStore A
+
+Node Instance B
+MemoryStore B
+```
+
+Requests handled by different application instances therefore do not currently share the same counter.
+
+A shared external store such as Redis can be used in future versions to support distributed rate limiting across multiple application instances.
 
 ---
 
 # Package
 
-npm:
+Install from npm:
 
 ```bash
 npm install influxguard
@@ -658,12 +1088,6 @@ Package name:
 
 ```text
 influxguard
-```
-
-Current stable release:
-
-```text
-1.0.0
 ```
 
 ---
