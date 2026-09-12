@@ -1,24 +1,24 @@
 {
   "name": "influxguard",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "A lightweight rate limiter for Express and NestJS",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "type": "module",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/index.d.mts",
+      "import": "./dist/index.mjs"
     }
-  },
-  "directories": {
-    "test": "tests"
   },
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
+  "directories": {
+    "test": "tests"
+  },
   "sideEffects": false,
   "scripts": {
     "build": "tsdown",
