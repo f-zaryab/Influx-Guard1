@@ -1,6 +1,6 @@
 {
   "name": "influxguard",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A lightweight rate limiter for Express and NestJS",
   "type": "module",
   "main": "./dist/index.cjs",
