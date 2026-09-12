@@ -1,5 +1,7 @@
 export { expressRateLimiter } from "./adapters/express/express-rate-limiter";
 export type { ExpressRateLimiterOptions } from "./adapters/express/types";
+export { createNestRateLimiterGuard } from "./adapters/nestjs/nest-rate-limiter";
+export type { NestRateLimiterOptions } from "./adapters/nestjs/types";
 export { RateLimiter } from "./core/rate-limiter";
 export type {
   RateLimitDecision,
