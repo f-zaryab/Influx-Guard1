@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { expressRateLimiter } from "../../src";
 
 describe("Express-Rate-Limiter", () => {
-  it("allows requests within the limit", async () => {
+  it("uses fixed-window by default", async () => {
     const app = express();
 
     app.use(
@@ -27,6 +27,27 @@ describe("Express-Rate-Limiter", () => {
     expect(response.headers["ratelimit-remaining"]).toBe("1");
   });
 
+  it("supports sliding-window", async () => {
+    const app = express();
+
+    app.use(
+      expressRateLimiter({
+        limit: 1,
+        windowMs: 60_000,
+        algorithm: "sliding-window",
+      }),
+    );
+
+    app.get("/", (_req, res) => {
+      res.json({
+        message: "success",
+      });
+    });
+
+    await request(app).get("/").expect(200);
+    await request(app).get("/").expect(429);
+  });
+
   it("returns 429 after exceeding the limit", async () => {
     const app = express();
 
@@ -34,6 +55,7 @@ describe("Express-Rate-Limiter", () => {
       expressRateLimiter({
         limit: 1,
         windowMs: 60_000,
+        algorithm: "fixed-window",
       }),
     );
 

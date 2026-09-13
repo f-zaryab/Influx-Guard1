@@ -1,40 +1,36 @@
-import type { RateLimitResult } from "../core/types";
 import type { Store } from "./store";
 
 type MemoryEntry = {
-  count: number;
-  resetTime: number;
+  value: unknown;
+  expiresAt?: number;
 };
 
 export class MemoryStore implements Store {
   private readonly entries = new Map<string, MemoryEntry>();
 
-  async increment(key: string, windowMs: number): Promise<RateLimitResult> {
-    const now = Date.now();
+  async get<T>(key: string): Promise<T | undefined> {
+    const entry = this.entries.get(key);
 
-    const existingEntry = this.entries.get(key);
-
-    // If no entry or time expired
-    if (!existingEntry || now >= existingEntry.resetTime) {
-      const resetTime = now + windowMs;
-
-      this.entries.set(key, {
-        count: 1,
-        resetTime: resetTime,
-      });
-
-      return {
-        totalHits: 1,
-        resetTime: new Date(resetTime),
-      };
+    if (!entry) {
+      return undefined;
     }
 
-    // Else
-    existingEntry.count += 1;
+    if (entry.expiresAt !== undefined && Date.now() >= entry.expiresAt) {
+      this.entries.delete(key);
+      return undefined;
+    }
 
-    return {
-      totalHits: existingEntry.count,
-      resetTime: new Date(existingEntry.resetTime),
-    };
+    return entry.value as T;
+  }
+
+  async set<T>(key: string, value: T, ttlMs?: number): Promise<void> {
+    this.entries.set(key, {
+      value: value,
+      expiresAt: ttlMs !== undefined ? Date.now() + ttlMs : undefined,
+    });
+  }
+
+  async delete(key: string): Promise<void> {
+    this.entries.delete(key);
   }
 }

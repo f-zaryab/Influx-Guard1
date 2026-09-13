@@ -8,6 +8,9 @@ import {
   type Type,
 } from "@nestjs/common";
 import type { Request, Response } from "express";
+import type { RateLimitAlgorithm } from "../../core/algorithms/algo";
+import { FixedWindowAlgorithm } from "../../core/algorithms/fixed-window";
+import { SlidingWindowAlgorithm } from "../../core/algorithms/sliding-window";
 import { RateLimiter } from "../../core/rate-limiter";
 import { MemoryStore } from "../../stores/memory-store";
 import type { NestRateLimiterOptions } from "./types";
@@ -15,10 +18,38 @@ import type { NestRateLimiterOptions } from "./types";
 export function createNestRateLimiterGuard(options: NestRateLimiterOptions): Type<CanActivate> {
   @Injectable()
   class RateLimiterGuard implements CanActivate {
-    private readonly limiter = new RateLimiter(options.store ?? new MemoryStore(), {
-      limit: options.limit,
-      windowMs: options.windowMs,
-    });
+    private readonly limiter: RateLimiter;
+
+    constructor() {
+      const store = options.store ?? new MemoryStore();
+
+      let algorithm: RateLimitAlgorithm;
+
+      switch (options.algorithm) {
+        case "sliding-window":
+          algorithm = new SlidingWindowAlgorithm(store, {
+            limit: options.limit,
+            windowMs: options.windowMs,
+          });
+          break;
+
+        case "fixed-window":
+          algorithm = new FixedWindowAlgorithm(store, {
+            limit: options.limit,
+            windowMs: options.windowMs,
+          });
+          break;
+
+        default:
+          algorithm = new FixedWindowAlgorithm(store, {
+            limit: options.limit,
+            windowMs: options.windowMs,
+          });
+          break;
+      }
+
+      this.limiter = new RateLimiter(algorithm);
+    }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
       const request = context.switchToHttp().getRequest<Request>();

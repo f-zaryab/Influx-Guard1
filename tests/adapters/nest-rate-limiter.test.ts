@@ -7,6 +7,7 @@ import { createNestRateLimiterGuard } from "../../src";
 const TestRateLimitGuard = createNestRateLimiterGuard({
   limit: 2,
   windowMs: 60_000,
+  algorithm: "fixed-window",
 });
 
 @Controller()
@@ -144,5 +145,38 @@ describe("Nest rate limiter", () => {
     await request(customApp.getHttpServer()).get("/api").set("x-api-key", "user-b").expect(200);
 
     await customApp.close();
+  });
+
+  it("supports sliding-window algorithm", async () => {
+    const SlidingWindowGuard = createNestRateLimiterGuard({
+      limit: 1,
+      windowMs: 60_000,
+      algorithm: "sliding-window",
+    });
+
+    @Controller("sliding")
+    @UseGuards(SlidingWindowGuard)
+    class SlidingController {
+      @Get()
+      index() {
+        return {
+          message: "OK",
+        };
+      }
+    }
+
+    const moduleRef = await Test.createTestingModule({
+      controllers: [SlidingController],
+    }).compile();
+
+    const slidingApp = moduleRef.createNestApplication();
+
+    await slidingApp.init();
+
+    await request(slidingApp.getHttpServer()).get("/sliding").expect(200);
+
+    await request(slidingApp.getHttpServer()).get("/sliding").expect(429);
+
+    await slidingApp.close();
   });
 });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStore } from "../../src";
 
-describe("Memory-Store", () => {
+describe("MemoryStore", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
@@ -11,62 +11,75 @@ describe("Memory-Store", () => {
     vi.useRealTimers();
   });
 
-  /* 
-  same key
-    request 1 → 1
-    request 2 → 2
-  */
-  it("increments requests for the same key", async () => {
+  it("stores and retrieves a value", async () => {
     const store = new MemoryStore();
 
-    const firstRequest = await store.increment("user-1", 60_000);
-    const secondRequest = await store.increment("user-1", 60_000);
+    await store.set("user-1", { count: 1 }, 60_000);
 
-    expect(firstRequest.totalHits).toBe(1);
-    expect(secondRequest.totalHits).toBe(2);
+    const result = await store.get<{ count: number }>("user-1");
+
+    expect(result).toEqual({
+      count: 1,
+    });
   });
 
-  /* 
-  different keys
-    user-1 → 1
-    user-2 → 1
-  */
-  it("keeps counters seperate between keys", async () => {
+  it("returns undefined for a missing key", async () => {
     const store = new MemoryStore();
 
-    await store.increment("user-1", 60_000);
+    const result = await store.get("user-1");
 
-    const result = await store.increment("user-2", 60_000);
-
-    expect(result.totalHits).toBe(1);
+    expect(result).toBeUndefined();
   });
 
-  /* 
-  window expires
-    next request → count resets to 1
-  */
-  it("resets the counter after the window expires", async () => {
+  it("keeps different keys independent", async () => {
     const store = new MemoryStore();
 
-    await store.increment("user-1", 60_000);
-    await store.increment("user-1", 60_000);
+    await store.set("user-1", { count: 1 }, 60_000);
+    await store.set("user-2", { count: 5 }, 60_000);
+
+    const user1 = await store.get<{ count: number }>("user-1");
+    const user2 = await store.get<{ count: number }>("user-2");
+
+    expect(user1).toEqual({ count: 1 });
+    expect(user2).toEqual({ count: 5 });
+  });
+
+  it("overwrites an existing value", async () => {
+    const store = new MemoryStore();
+
+    await store.set("user-1", { count: 1 }, 60_000);
+    await store.set("user-1", { count: 2 }, 60_000);
+
+    const result = await store.get<{ count: number }>("user-1");
+
+    expect(result).toEqual({
+      count: 2,
+    });
+  });
+
+  it("expires a value after its TTL", async () => {
+    const store = new MemoryStore();
+
+    await store.set("user-1", { count: 1 }, 60_000);
 
     vi.advanceTimersByTime(60_000);
 
-    const result = await store.increment("user-1", 60_000);
+    const result = await store.get("user-1");
 
-    expect(result.totalHits).toBe(1);
+    expect(result).toBeUndefined();
   });
 
-  /*
-  same window
-    resetTime remains unchanged
-  */
-  it("sets reset time based on windowMs", async () => {
+  it("keeps a value before its TTL expires", async () => {
     const store = new MemoryStore();
 
-    const result = await store.increment("user-1", 60_000);
+    await store.set("user-1", { count: 1 }, 60_000);
 
-    expect(result.resetTime.getTime()).toBe(Date.now() + 60_000);
+    vi.advanceTimersByTime(59_999);
+
+    const result = await store.get<{ count: number }>("user-1");
+
+    expect(result).toEqual({
+      count: 1,
+    });
   });
 });

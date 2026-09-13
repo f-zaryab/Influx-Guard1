@@ -1,5 +1,7 @@
-import type { RateLimitResult } from "../core/types";
-
 export interface Store {
-  increment(key: string, windowMs: number): Promise<RateLimitResult>;
+  get<T>(key: string): Promise<T | undefined>;
+
+  set<T>(key: string, value: T, ttlMs?: number): Promise<void>;
+
+  delete(key: string): Promise<void>;
 }
